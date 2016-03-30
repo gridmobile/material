@@ -1,0 +1,15 @@
+<div layout="column" ng-cloak ng-controller="BasicDemoCtrl">
+  <md-card md-colors="{background: 'myTheme-accent-500-0.87'}">
+    <md-card-title>
+      <span md-colors="{color: '{{color}}'}">Now you can use</span>
+    </md-card-title>
+  </md-card>
+  <md-card md-colors="{background: '{{checked ? 'red' : 'yellow'}}'}">
+    <md-card-title>
+      <span>Any color from any palette</span>
+    </md-card-title>
+    <md-card-content>
+      <md-checkbox ng-model="checked">Change color</md-checkbox>
+    </md-card-content>
+  </md-card>
+</div>
