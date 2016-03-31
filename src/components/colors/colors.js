@@ -1,110 +1,192 @@
-/**
- * @ngdoc module
- * @name material.components.colors
- *
- * @description
- * Colors directive
- */
-angular.module('material.components.colors', [
-    'material.core'
-  ])
-  .directive('mdColors', mdColorsDirective);
+(function(   ){
+    "use strict";
 
-/**
- * @ngdoc directive
- * @name mdColors
- * @module material.components.colors
- *
- * @restrict A
- *
- * @description
- * `mdColors` directive will apply the requested color from the palette as inline style on its element,
- * The format will be similar to our color defining in the scss files:
- * ## ‘[?theme]-[palette]-[?hue]-[?opacity]’
- * - [theme]    - default value is the default theme
- * - [palette]  - can be either palette name or primary/accent/warn/background
- * - [hue]      - default is 500
- * - [opacity]  - default is 1
- * - ?          - optional
- *
- * @usage
- * <hljs lang="html">
- *   <div md-colors="{background: 'myTheme-accent-900-0.43'}">
- *     <div md-colors="{color: 'red-A100', border-color: 'primary-600'}">
- *       <span>Color demo</span>
- *     </div>
- *   </div>
- * </hljs>
- *
- */
+  /**
+   *  Use a RegExp to check if the `md-colors="<expression>"` is static string
+   *  or one that should be observed and dynamically interpolated.
+   */
+  var STATIC_COLOR_EXPRESSION = /^{((\s|,)*?["'a-zA-Z-]+?\s*?:\s*?('|")[a-zA-Z0-9-.]*('|"))+\s*}$/;
+  var COLOR_PALETTES = undefined;
 
-function mdColorsDirective($mdColorPalette, $mdTheming, $log, $parse) {
-  var OBJECT_STRING_VALUE = /^{((\s|,)*?["'a-zA-Z-]+?\s*?:\s*?('|")[a-zA-Z0-9-.]*('|"))+\s*}$/;
+  /**
+   * @ngdoc module
+   * @name material.components.colors
+   *
+   * @description
+   * Define $mdColors service and a `md-colors=""` attribute directive
+   */
+  angular
+    .module('material.components.colors', [ 'material.core' ])
+    .directive('mdColors', MdColorsDirective)
+    .service('$mdColors', MdColorsService);
 
-  return {
-    restrict: 'A',
-    compile: function (tElem, tAttrs) {
-      var initialColorValue = tAttrs.mdColors;
+  /**
+   * @ngdoc service
+   * @name $mdColors
+   * @module material.core.theming.colors
+   *
+   * @description
+   * `$mdColors` service is used by the md-color directive to convert the 1..n color expressions to RGBA values and will apply
+   * those values to element as CSS property values.
+   *
+   *   The format will be similar to our color defining in the scss files:
+   *
+   *   ## ‘[?theme]-[palette]-[?hue]-[?opacity]’
+   *   - [theme]    - default value is the default theme
+   *   - [palette]  - can be either palette name or primary/accent/warn/background
+   *   - [hue]      - default is 500
+   *   - [opacity]  - default is 1
+   *   - ?          - optional
+   *
+   *  @usage
+   *  <hljs lang="html">
+   *    <div md-colors="{background: 'myTheme-accent-900-0.43'}">
+   *      <div md-colors="{color: 'red-A100', border-color: 'primary-600'}">
+   *        <span>Color demo</span>
+   *      </div>
+   *    </div>
+   *  </hljs>
+   *
+   */
+  function MdColorsService($mdTheming, $mdColorPalette, $mdUtil, $parse) {
+    COLOR_PALETTES = COLOR_PALETTES || Object.keys($mdColorPalette);
 
-      return function (scope, elem, attrs) {
-        var interpolateColor = function (val) {
-          // Converting string into an object and interpolates values via the scope
-          val = $parse(val)(scope);
+    // Publish service instance
+    return {
+      applyThemeColors : applyThemeColors
+    };
 
-          angular.forEach(val, function (value, key) {
-            var split = val[key].split('-');
+    // ********************************************
+    // Internal Methods
+    // ********************************************
 
-            var theme = 'default';
+    /**
+     * Convert the color expression into an object with scope-interpolated values
+     * Then calculate the rgba() values based on the theme color parts
+     */
+    function applyThemeColors(element, scope, colorExpression) {
+      // Json.parse() does not work because the keys are not quoted;
+      // use $parse to convert to a hashmap
+      var themeColors = $parse(colorExpression)(scope);
 
-            // Checking if the first section is actually a theme
-            if ($mdTheming.THEMES[split[0]]) {
-              theme = split.splice(0, 1);
-            }
+      // Assign the calculate RGBA color values directly as inline CSS
+      element.css( interpolateColors( themeColors ) );
+    }
 
-            var palette = split[0];
-            var colorPalettes = Object.keys($mdColorPalette);
+    /**
+     * Convert the color expression into an object with scope-interpolated values
+     * Then calculate the rgba() values based on the theme color parts
+     *
+     * @results Hashmap of CSS properties with associated `rgba( )` string vales
+     *
+     *
+     */
+    function interpolateColors( themeColors ) {
+      var rgbColors = { };
 
-            // If the next section is one of the palettes we assume it's a two word palette
-            if (split.length > 1 && colorPalettes.indexOf(split[1]) !== -1) {
-              palette += '-' + split.splice(1, 1);
-            }
-            else {
-              // Two word palette can be also written in camelCase, forming camelCase to dash-case
-              palette = palette.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
-            }
+      angular.forEach(themeColors, function(value, key) {
+        var color = extractColorOptions(value);
+        var rgbValues = $mdColorPalette[color.palette][color.hue].value;
 
-            // If the palette is not in the palette list it's one of primary/accent/warn/background
-            if (colorPalettes.indexOf(palette) === -1) {
-              var scheme = $mdTheming.THEMES[theme].colors[palette];
+        rgbColors[key] = $mdUtil.supplant('rgba( {0}, {1}, {2}, {3} )',
+          [rgbValues[0],rgbValues[1],rgbValues[2], color.opacity]
+        );
+      });
 
-              if (!scheme) {
-                return $log.error('mdColors: couldn\'t find \'' + palette + '\' in the palettes.');
-              }
+      return rgbColors;
+    }
 
-              palette = scheme.name;
-            }
+    /**
+     * For the evaluated expression, extract the color parts into a hashmap
+     */
+    function extractColorOptions(expression) {
+      var parts = expression.split('-'),
+          hasTheme = angular.isDefined($mdTheming.THEMES[parts[0]]),
+          theme = hasTheme ? parts.splice(0, 1)[0] : undefined;
 
-            var hue = split[1] || 500;
-            var opacity = split[2] || 1;
+      return {
+        theme   : theme || 'default',
+        palette : extractPalette(parts, theme),
+        hue     : parts[1] || 500,
+        opacity : parts[2] || 1
+      };
+    }
 
-            var color = $mdColorPalette[palette][hue].value;
+    /**
+     * Calculate the theme palette name
+     */
+    function extractPalette(parts, theme) {
+      // If the next section is one of the palettes we assume it's a two word palette
+      // Two word palette can be also written in camelCase, forming camelCase to dash-case
 
-            elem.css(key, 'rgba(' + color[0] + ', ' + color[1] + ', ' + color[2] + ', ' + opacity + ')');
-          });
-        };
+      var isTwoWord = parts.length > 1 && COLOR_PALETTES.indexOf(parts[1]) !== -1;
+      var palette = parts[0].replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 
-        // Checking if watch is required
-        if (!OBJECT_STRING_VALUE.test(initialColorValue)) {
-          scope.$watch(function () {
-            return attrs.mdColors;
-          }, function (val) {
-            interpolateColor(val);
-          });
+      if ( isTwoWord )  palette = parts[0] + '-' + parts.splice(1, 1);
+
+      if (COLOR_PALETTES.indexOf(palette) === -1) {
+        // If the palette is not in the palette list it's one of primary/accent/warn/background
+        var scheme = $mdTheming.THEMES[theme].colors[palette];
+        if (!scheme) {
+          throw new Error('mdColors: couldn\'t find \'' + palette + '\' in the palettes.');
         }
-        else {
-          interpolateColor(initialColorValue);
-        }
+        palette = scheme.name;
       }
+
+      return palette;
     }
   }
-}
+
+  /**
+   * @ngdoc directive
+   * @name mdColors
+   * @module material.components.colors
+   *
+   * @restrict A
+   *
+   * @description
+   * `mdColors` directive will apply the theme-based color expression as RGBA CSS style values.
+   *
+   * @usage
+   * <hljs lang="html">
+   *   <div md-colors="{background: 'myTheme-accent-900-0.43'}">
+   *     <div md-colors="{color: 'red-A100', border-color: 'primary-600'}">
+   *       <span>Color demo</span>
+   *     </div>
+   *   </div>
+   * </hljs>
+   *
+   */
+  function MdColorsDirective($mdColors, $log) {
+    return {
+      restrict: 'A',
+      compile: function(tElem, tAttrs) {
+        var rawColorExpression = tAttrs.mdColors;
+        var shouldWatch = !STATIC_COLOR_EXPRESSION.test( rawColorExpression );
+
+        return function(scope, element , attrs) {
+          var colorExpression = function() { return attrs.mdColors; };
+
+          try {
+
+            if ( shouldWatch )  {
+              scope.$watch( colorExpression, angular.bind(this,
+                $mdColors.applyThemeColors, element, scope
+              ));
+            }
+            else {
+              $mdColors.applyThemeColors( element, scope, colorExpression() );
+            }
+
+          } catch( e ) {
+            $log.error( e.message );
+          }
+
+        }
+      }
+    };
+
+  }
+
+
+})( );
